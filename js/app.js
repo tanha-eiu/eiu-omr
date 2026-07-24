@@ -147,7 +147,7 @@ function closeMaDeEditor() {
   renderMaDeList();
 }
 
-function saveMaDe() {
+async function saveMaDe() {
   const name = document.getElementById("maDeName").value.trim();
   const msgEl = document.getElementById("maDeValidateMsg");
   if (!name) { msgEl.textContent = "Vui lòng nhập tên mã đề."; msgEl.className = "validate-msg error"; return; }
@@ -155,15 +155,28 @@ function saveMaDe() {
   const parsed = readMaDeAnswerGrid();
   if (!parsed.ok) { msgEl.textContent = parsed.error; msgEl.className = "validate-msg error"; return; }
 
+  let maDeObj;
   if (state.editingMaDeId) {
-    const md = state.maDeList.find(m => m.id === state.editingMaDeId);
-    md.name = name; md.answers = parsed.answers;
+    maDeObj = state.maDeList.find(m => m.id === state.editingMaDeId);
+    maDeObj.name = name; maDeObj.answers = parsed.answers;
   } else {
-    state.maDeList.push({ id: "made_" + Date.now(), name, answers: parsed.answers });
+    maDeObj = { id: "made_" + Date.now(), name, answers: parsed.answers };
+    state.maDeList.push(maDeObj);
   }
-  msgEl.textContent = "Hợp lệ, đủ " + SO_CAU + " câu.";
-  msgEl.className = "validate-msg ok";
   persistMaDeList();
+
+  if (SheetsSync.isConfigured()) {
+    msgEl.textContent = "Đang đồng bộ lên Google Sheet...";
+    msgEl.className = "validate-msg";
+    const synced = await SheetsSync.saveMaDe(maDeObj);
+    msgEl.textContent = synced
+      ? "Hợp lệ, đủ " + SO_CAU + " câu. Đã đồng bộ Google Sheet."
+      : "Đã lưu tại máy, nhưng đồng bộ Google Sheet thất bại (kiểm tra URL/mạng).";
+    msgEl.className = synced ? "validate-msg ok" : "validate-msg error";
+  } else {
+    msgEl.textContent = "Hợp lệ, đủ " + SO_CAU + " câu. (Chưa cấu hình Google Sheet nên chỉ lưu tại máy.)";
+    msgEl.className = "validate-msg ok";
+  }
   closeMaDeEditor();
 }
 
@@ -173,6 +186,28 @@ function persistMaDeList() {
 function loadMaDeList() {
   const raw = localStorage.getItem("omr_ma_de_list");
   state.maDeList = raw ? JSON.parse(raw) : [];
+}
+
+async function syncMaDeListFromSheet() {
+  if (!SheetsSync.isConfigured()) {
+    document.getElementById("sheetSyncStatus").textContent = "chưa cấu hình (sửa js/config.js)";
+    return;
+  }
+  const statusEl = document.getElementById("sheetSyncStatus");
+  statusEl.textContent = "đang tải mã đề từ Google Sheet...";
+  try {
+    const remoteList = await SheetsSync.listMaDe();
+    if (remoteList) {
+      state.maDeList = remoteList;
+      persistMaDeList(); // giữ bản sao cục bộ để dùng offline
+      renderMaDeList();
+      statusEl.textContent = `đã kết nối — ${remoteList.length} mã đề trên Google Sheet`;
+    } else {
+      statusEl.textContent = "không đọc được dữ liệu từ Google Sheet";
+    }
+  } catch (err) {
+    statusEl.textContent = "lỗi kết nối Google Sheet (dùng dữ liệu lưu tại máy)";
+  }
 }
 
 // ============================================================
@@ -664,46 +699,95 @@ async function gradeAllConfirmedSheets() {
   await nextFrame();
 
   let gradedCount = 0;
+  const newlyGraded = []; // để đồng bộ lên Google Sheet, chỉ gồm các dòng vừa chấm trong lượt này
 
   state.sheetCache.forEach(cache => {
     if (!cache || !cache.confirmed || cache.graded) return;
 
     let dung = 0;
     const cauSai = [];
+    const chiTiet = [];
     for (let q = 1; q <= SO_CAU; q++) {
       const dapAnDung = maDe.answers[q];
       const dapAnSV = cache.currentAnswers[q];
-      if (dapAnSV === dapAnDung) dung++;
+      const isDung = dapAnSV === dapAnDung;
+      if (isDung) dung++;
       else if (!dapAnSV) cauSai.push(`${q}(bỏ trống)`);
       else cauSai.push(String(q));
+      chiTiet.push({ cau: q, dapAnSV: dapAnSV || null, dapAnDung, dung: isDung });
     }
     const diem = dung * 5;
     const dungTong = `${dung}/${SO_CAU}`;
     const candidateNoNorm = normalizeCandidateNo(cache.candidateNo);
 
     const rosterRow = state.rosterResults.find(r => r.candidateNo === candidateNoNorm);
+    let resultEntry;
     if (rosterRow && rosterRow.diem === null) {
       rosterRow.diem = diem;
       rosterRow.dungTong = dungTong;
       rosterRow.cauSai = cauSai;
       rosterRow.de = maDe.name;
+      resultEntry = rosterRow;
     } else if (!rosterRow) {
-      state.unmatchedResults.push({
+      resultEntry = {
         candidateNo: cache.candidateNo || "?",
         hoTen: "", mssv: "", unmatched: true,
         de: maDe.name, diem, dungTong, cauSai
-      });
+      };
+      state.unmatchedResults.push(resultEntry);
     }
     // nếu rosterRow đã có điểm từ trước (chấm đề khác rồi) -> bỏ qua, không ghi đè
 
-    cache.graded = true;
-    gradedCount++;
+    if (resultEntry) {
+      newlyGraded.push({ ...resultEntry, chiTiet });
+      cache.graded = true;
+      gradedCount++;
+    }
   });
 
   updatePendingCountLabel();
   renderResultTable();
+
+  let syncMsg = "";
+  if (SheetsSync.isConfigured() && newlyGraded.length > 0) {
+    showLoading(`Đang đồng bộ ${newlyGraded.length} kết quả lên Google Sheet...`);
+    const synced = await SheetsSync.saveResultsBatch(newlyGraded);
+    syncMsg = synced ? "\nĐã đồng bộ lên Google Sheet." : "\nĐồng bộ Google Sheet thất bại (kiểm tra URL/mạng) — kết quả vẫn còn trong app, có thể chấm lại sau.";
+  }
+
   hideLoading();
-  alert(`Đã chấm ${gradedCount} phiếu theo ${maDe.name}.`);
+  alert(`Đã chấm ${gradedCount} phiếu theo ${maDe.name}.${syncMsg}`);
+
+  if (gradedCount > 0) {
+    resetSheetPanelForNextExam();
+  }
+}
+
+// Dọn khung xem phiếu để sẵn sàng nạp mã đề/lô phiếu tiếp theo.
+// Không đụng tới rosterResults/unmatchedResults (kết quả vẫn giữ nguyên trong tab Kết quả).
+function resetSheetPanelForNextExam() {
+  state.pageCanvases = [];
+  state.sheetCache = [];
+  state.currentIndex = -1;
+  if (state.warpedGrayMat) { state.warpedGrayMat.delete(); state.warpedGrayMat = null; }
+
+  const canvasEl = document.getElementById("sheetCanvas");
+  canvasEl.width = 0;
+  canvasEl.height = 0;
+  canvasEl.onclick = null;
+
+  document.getElementById("progressLabel").textContent = "Chưa có phiếu nào";
+  document.getElementById("warningBanner").hidden = true;
+  document.getElementById("manualCornerBanner").hidden = true;
+  document.getElementById("cornerHandles").hidden = true;
+  document.getElementById("btnAlignManual").hidden = true;
+  document.getElementById("candidateNoValue").textContent = "—";
+  document.getElementById("candidateNoName").textContent = "Chưa xác định sinh viên";
+  document.getElementById("answerGrid").innerHTML = "";
+  document.getElementById("btnPrevSheet").disabled = true;
+  document.getElementById("btnNextSheet").disabled = true;
+  document.getElementById("inputPdf").value = "";
+  updatePendingCountLabel();
 }
 
 // ============================================================
@@ -793,7 +877,7 @@ function applyZoom() {
   canvasEl.style.transformOrigin = "top left";
 }
 
-function init() {
+async function init() {
   initTabs();
   loadMaDeList();
   renderMaDeList();
@@ -801,6 +885,7 @@ function init() {
   renderResultTable();
   updatePendingCountLabel();
   initEvents();
+  await syncMaDeListFromSheet();
 }
 
 document.addEventListener("DOMContentLoaded", init);

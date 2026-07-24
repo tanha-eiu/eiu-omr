@@ -277,6 +277,21 @@ textarea{ width:100%; resize:vertical; font-family:monospace; }
   font-weight:600;
 }
 
+/* ===== Cấu hình đồng bộ Google Sheet ===== */
+.sync-config{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  background: var(--bg-muted);
+  border:1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding:10px 14px;
+  margin-bottom:16px;
+  flex-wrap:wrap;
+}
+.sync-config label{ font-size:13px; color:var(--text-secondary); white-space:nowrap; }
+.sync-config input{ flex:1; min-width:220px; font-family:monospace; font-size:12px; }
+
 /* ===== Tab 2: quản lý mã đề ===== */
 .panel-header{
   display:flex;
