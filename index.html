@@ -107,6 +107,11 @@
   <!-- ===== TAB 2: QUẢN LÝ MÃ ĐỀ ===== -->
   <section id="tab-quan-ly-ma-de" class="tab-content">
 
+    <div class="sync-config">
+      <span class="muted">Đồng bộ Google Sheet:</span>
+      <span id="sheetSyncStatus" class="toolbar-status-inline">chưa cấu hình (sửa js/config.js)</span>
+    </div>
+
     <div class="panel-header">
       <p id="maDeCountLabel" class="muted">0 mã đề đã lưu</p>
       <button id="btnAddMaDe" class="btn btn-accent"><span class="icon-plus"></span> Thêm mã đề</button>
@@ -183,11 +188,13 @@
 
 </main>
 
+<script src="js/config.js"></script>
 <script src="js/lib-loader.js"></script>
 <script src="js/template-config.js"></script>
 <script src="js/pdf-loader.js"></script>
 <script src="js/omr-engine.js"></script>
 <script src="js/excel-io.js"></script>
+<script src="js/sheets-sync.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
