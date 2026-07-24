@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hệ thống chấm trắc nghiệm</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="loadingOverlay" class="loading-overlay" hidden>
+  <div class="loading-box">
+    <div class="loading-spinner"></div>
+    <p id="loadingText">Đang chấm điểm...</p>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-brand">
+    <span class="topbar-title">Hệ thống chấm trắc nghiệm</span>
+  </div>
+  <nav class="topbar-nav">
+    <button class="nav-item active" data-tab="cham-bai">Chấm bài</button>
+    <button class="nav-item" data-tab="quan-ly-ma-de">Quản lý mã đề</button>
+    <button class="nav-item" data-tab="ket-qua">Kết quả</button>
+  </nav>
+</header>
+
+<main class="app-panel">
+
+  <!-- ===== TAB 1: CHẤM BÀI ===== -->
+  <section id="tab-cham-bai" class="tab-content active">
+
+    <div class="toolbar">
+      <label for="selectMaDe">Mã đề</label>
+      <select id="selectMaDe"></select>
+
+      <label for="inputStudentList" class="btn">Chọn file danh sách</label>
+      <input type="file" id="inputStudentList" accept=".xlsx,.xls,.csv" hidden>
+      <span id="studentListFileName" class="toolbar-status-inline">chưa chọn file</span>
+      <button id="btnUploadStudentList" class="btn">Tải lên</button>
+
+      <label for="inputPdf" class="btn btn-accent">
+        <span class="icon-upload"></span> Tải phiếu scan
+      </label>
+      <input type="file" id="inputPdf" accept="application/pdf" hidden>
+
+      <span id="progressLabel" class="toolbar-status">Chưa có phiếu nào</span>
+    </div>
+
+    <div class="toolbar toolbar-secondary">
+      <span id="pendingCountLabel" class="muted">0 phiếu đã xác nhận, chưa chấm điểm</span>
+      <button id="btnGradeAll" class="btn btn-primary">Chấm điểm toàn bộ</button>
+    </div>
+
+    <div class="grading-grid">
+
+      <div class="sheet-panel">
+        <div id="warningBanner" class="warning-banner" hidden>
+          <span class="icon-alert"></span>
+          <span id="warningText">Câu cần kiểm tra lại</span>
+        </div>
+        <div id="manualCornerBanner" class="warning-banner" hidden>
+          <span class="icon-alert"></span>
+          <span>Không tự dò được 4 marker góc — kéo 4 chấm vào đúng vị trí marker rồi bấm "Căn chỉnh"</span>
+        </div>
+        <div id="sheetCanvasWrap" class="sheet-canvas-wrap">
+          <canvas id="sheetCanvas"></canvas>
+          <div id="cornerHandles" class="corner-handles" hidden>
+            <div class="corner-handle" data-corner="tl"></div>
+            <div class="corner-handle" data-corner="tr"></div>
+            <div class="corner-handle" data-corner="br"></div>
+            <div class="corner-handle" data-corner="bl"></div>
+          </div>
+        </div>
+        <div class="sheet-nav">
+          <button id="btnPrevSheet" class="btn">← Phiếu trước</button>
+          <button id="btnNextSheet" class="btn">Phiếu sau →</button>
+          <button id="btnAlignManual" class="btn" hidden>Căn chỉnh</button>
+          <button id="btnZoomIn" class="btn">Phóng to</button>
+          <button id="btnZoomOut" class="btn">Thu nhỏ</button>
+        </div>
+      </div>
+
+      <div class="side-panel">
+        <div class="card">
+          <p class="card-label">Số báo danh nhận diện</p>
+          <p id="candidateNoValue" class="card-value">—</p>
+          <p id="candidateNoName" class="card-sub">Chưa xác định sinh viên</p>
+        </div>
+
+        <div class="card card-grow">
+          <p class="card-label">Đáp án nhận diện</p>
+          <div id="answerGrid" class="answer-grid">
+            <!-- 20 ô câu trả lời được render bằng JS -->
+          </div>
+        </div>
+
+        <button id="btnConfirmNext" class="btn btn-primary btn-block">
+          Xác nhận, qua phiếu kế tiếp <span class="icon-arrow-right"></span>
+        </button>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===== TAB 2: QUẢN LÝ MÃ ĐỀ ===== -->
+  <section id="tab-quan-ly-ma-de" class="tab-content">
+
+    <div class="panel-header">
+      <p id="maDeCountLabel" class="muted">0 mã đề đã lưu</p>
+      <button id="btnAddMaDe" class="btn btn-accent"><span class="icon-plus"></span> Thêm mã đề</button>
+    </div>
+
+    <div id="maDeList" class="ma-de-list">
+      <!-- danh sách mã đề render bằng JS -->
+    </div>
+
+    <div class="ma-de-editor" id="maDeEditor" hidden>
+      <label for="maDeName">Tên mã đề</label>
+      <input type="text" id="maDeName" placeholder="Ví dụ: Đề 1">
+
+      <label>Đáp án đúng (20 câu)</label>
+      <div id="maDeAnswerGrid" class="ma-de-answer-grid">
+        <!-- 20 ô chọn đáp án dạng bảng, render bằng JS -->
+      </div>
+
+      <div class="editor-actions">
+        <button id="btnSaveMaDe" class="btn btn-primary">Lưu mã đề</button>
+        <button id="btnCancelMaDe" class="btn">Hủy</button>
+        <span id="maDeValidateMsg" class="validate-msg"></span>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ===== TAB 3: KẾT QUẢ ===== -->
+  <section id="tab-ket-qua" class="tab-content">
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <p class="card-label">Đã chấm / Tổng số lớp</p>
+        <p id="statTotal" class="stat-value">0 / 0</p>
+      </div>
+      <div class="stat-card">
+        <p class="card-label">Điểm trung bình</p>
+        <p id="statAvg" class="stat-value">—</p>
+      </div>
+      <div class="stat-card">
+        <p class="card-label">Không khớp danh sách</p>
+        <p id="statUnmatched" class="stat-value stat-danger">0</p>
+      </div>
+      <div class="stat-card">
+        <p class="card-label">Mã đề đang chọn</p>
+        <p id="statMaDe" class="stat-value">—</p>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table id="resultTable" class="result-table">
+        <thead>
+          <tr>
+            <th style="width:8%">Candidate No.</th>
+            <th style="width:22%">Họ và tên</th>
+            <th style="width:13%">MSSV</th>
+            <th style="width:7%">Đề</th>
+            <th style="width:8%">Điểm</th>
+            <th style="width:10%">Đúng/Tổng</th>
+            <th>Câu sai</th>
+          </tr>
+        </thead>
+        <tbody id="resultTableBody">
+          <!-- kết quả render bằng JS -->
+        </tbody>
+      </table>
+    </div>
+
+    <button id="btnExportExcel" class="btn btn-accent">
+      <span class="icon-download"></span> Xuất file Excel
+    </button>
+
+  </section>
+
+</main>
+
+<script src="js/lib-loader.js"></script>
+<script src="js/template-config.js"></script>
+<script src="js/pdf-loader.js"></script>
+<script src="js/omr-engine.js"></script>
+<script src="js/excel-io.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
