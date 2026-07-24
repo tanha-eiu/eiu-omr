@@ -767,7 +767,7 @@ function renderConflictList() {
     const item = document.createElement("div");
     item.className = "conflict-item";
     item.innerHTML = `
-      <div class="conflict-cand">Candidate No. ${c.existing.candidateNo}</div>
+      <div class="conflict-cand">Candidate No. ${formatCandidateNoDisplay(c.existing.candidateNo)}</div>
       <div class="conflict-row">Bài đã có: ${c.existing.de || "?"} — điểm ${c.existing.diem} (${c.existing.dungTong})</div>
       <div class="conflict-row">Bài mới quét: ${c.incoming.de || "?"} — điểm ${c.incoming.diem} (${c.incoming.dungTong})</div>
       <div class="conflict-actions">
@@ -887,7 +887,7 @@ function renderResultTable() {
 
     const editable = !r.isPlaceholder;
     tr.innerHTML = `
-      <td>${r.candidateNo ?? ""}</td>
+      <td>${formatCandidateNoDisplay(r.candidateNo)}</td>
       <td class="editable-name" ${editable ? 'contenteditable="true"' : ""} data-key="${r.key}" data-field="hoTen">${r.hoTen ?? ""}</td>
       <td class="mssv-cell" ${editable ? 'contenteditable="true"' : ""} data-key="${r.key}" data-field="mssv">${r.isPlaceholder ? (r.mssv ?? "") : (r.mssv ?? "")}</td>
       <td>${r.de ?? ""}</td>

@@ -2,10 +2,22 @@
 // Đọc/ghi file Excel bằng SheetJS
 // =========================================================
 
-// Chuẩn hóa số báo danh: bỏ số 0 ở đầu để so khớp nhất quán dù sinh viên
-// tô đủ 4 ô hay chỉ tô 2 ô cuối (theo logic đọc phiếu: cột trống bị bỏ qua)
+// Chuẩn hóa số báo danh để SO KHỚP: ép về số nguyên rồi chuyển lại chuỗi.
+// Cách này loại bỏ mọi số 0 ở đầu một cách nhất quán, không phụ thuộc
+// cách viết ("10", "010", "0010" đều chuẩn hóa thành "10").
 function normalizeCandidateNo(v) {
-  return String(v ?? "").trim().replace(/^0+(?=\d)/, "");
+  const s = String(v ?? "").trim();
+  if (!s) return "";
+  if (/^\d+$/.test(s)) return String(parseInt(s, 10));
+  return s; // không phải toàn chữ số (vd "(không đọc được)") -> giữ nguyên
+}
+
+// Định dạng số báo danh để HIỂN THỊ: tối thiểu 2 chữ số (1 -> "01", 14 -> "14").
+// Chỉ dùng cho hiển thị (bảng kết quả, Excel), KHÔNG dùng để so khớp.
+function formatCandidateNoDisplay(v) {
+  const normalized = normalizeCandidateNo(v);
+  if (!/^\d+$/.test(normalized)) return v ?? "";
+  return normalized.padStart(2, "0");
 }
 
 // Chuẩn hóa tên cột để so khớp linh hoạt: bỏ khoảng trắng, dấu chấm, viết thường.
@@ -64,7 +76,7 @@ async function exportResultsToExcel(results, fileName) {
   await XlsxLib.load();
 
   const data = results.map(r => ({
-    "Candidate No.": r.candidateNo ?? "",
+    "Candidate No.": formatCandidateNoDisplay(r.candidateNo),
     "Họ và tên": r.hoTen ?? "",
     "MSSV": r.unmatched ? "CHƯA KHỚP - kiểm tra tay" : (r.mssv ?? ""),
     "Đề": r.de ?? "",
