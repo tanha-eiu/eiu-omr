@@ -9,12 +9,18 @@ const state = {
   maDeList: [],
   editingMaDeId: null,
 
-  pendingStudentFile: null,   // file đã chọn nhưng chưa bấm "Tải lên"
-  rosterResults: [],          // danh sách lớp bền vững, giữ nguyên qua nhiều lần chấm đề khác nhau
-  unmatchedResults: [],       // các phiếu có candidateNo không khớp ai trong danh sách
+  pendingStudentFile: null,
+  studentList: [],            // danh sách lớp (nếu đã tải), dùng để tra tên + hiện dòng chờ chấm
 
-  pageCanvases: [],           // canvas gốc từng trang PDF (chưa warp)
-  sheetCache: [],             // cache theo từng trang: {processed, corners, candidateNo, candidateColumns, currentAnswers, reviewFlags, confirmed, graded, needsManual}
+  // Kết quả đã chấm, dạng map: key -> entry
+  // key = candidateNo đã chuẩn hóa, hoặc "blank_<n>" nếu phiếu không đọc được candidateNo
+  gradedResults: {},
+
+  pendingConflicts: [],       // hàng đợi xử lý trùng candidateNo khi chấm điểm
+  pendingFinish: null,        // {maDe, committed:[]} chờ chấm xong toàn bộ conflict rồi mới hoàn tất
+
+  pageCanvases: [],
+  sheetCache: [],
   currentIndex: -1,
 
   currentAnswers: {},
@@ -44,7 +50,7 @@ function initTabs() {
 }
 
 // ============================================================
-// 2. QUẢN LÝ MÃ ĐỀ — bảng nhập đáp án kiểu Excel (20 ô chọn)
+// 2. QUẢN LÝ MÃ ĐỀ — bảng nhập đáp án kiểu Excel
 // ============================================================
 
 function renderMaDeAnswerGrid(existingAnswers) {
@@ -199,7 +205,7 @@ async function syncMaDeListFromSheet() {
     const remoteList = await SheetsSync.listMaDe();
     if (remoteList) {
       state.maDeList = remoteList;
-      persistMaDeList(); // giữ bản sao cục bộ để dùng offline
+      persistMaDeList();
       renderMaDeList();
       statusEl.textContent = `đã kết nối — ${remoteList.length} mã đề trên Google Sheet`;
     } else {
@@ -211,7 +217,7 @@ async function syncMaDeListFromSheet() {
 }
 
 // ============================================================
-// 3. DANH SÁCH SINH VIÊN — chọn file, rồi bấm "Tải lên" mới đọc
+// 3. DANH SÁCH SINH VIÊN — có thể tải trước hoặc sau khi đã chấm
 // ============================================================
 
 function handleStudentListFileSelected(file) {
@@ -236,22 +242,24 @@ async function uploadStudentList() {
       return;
     }
 
-    // Danh sách lớp mới -> khởi tạo lại roster (mỗi sinh viên 1 dòng, chưa có điểm)
-    state.rosterResults = list.map(s => ({
-      candidateNo: s.candidateNo,
-      stt: s.stt,
-      hoTen: s.hoTen,
-      mssv: s.mssv,
-      de: null,
-      diem: null,
-      dungTong: null,
-      cauSai: null
-    }));
-    state.unmatchedResults = [];
-    // reset cờ "graded" của các phiếu đã xử lý trước đó, vì roster mới không còn tương ứng
-    state.sheetCache.forEach(c => { if (c) c.graded = false; });
+    state.studentList = list;
 
-    statusEl.textContent = `${originalName} — đã tải ${list.length} sinh viên`;
+    // Đối chiếu ngược: các bài đã chấm trước đó (chưa có tên) mà khớp candidateNo
+    // trong danh sách mới -> tự động điền tên, trừ khi đã được sửa tay thủ công.
+    let matchedCount = 0;
+    Object.values(state.gradedResults).forEach(entry => {
+      if (entry.manualOverride) return;
+      const student = list.find(s => s.candidateNo === normalizeCandidateNo(entry.candidateNo));
+      if (student) {
+        entry.hoTen = student.hoTen;
+        entry.mssv = student.mssv;
+        entry.matched = true;
+        matchedCount++;
+      }
+    });
+
+    statusEl.textContent = `${originalName} — đã tải ${list.length} sinh viên` +
+      (matchedCount > 0 ? `, đối chiếu được ${matchedCount} bài đã chấm trước đó` : "");
     renderResultTable();
   } catch (err) {
     statusEl.textContent = originalName + " — lỗi đọc file";
@@ -293,13 +301,8 @@ async function loadCurrentSheet() {
   const cache = state.sheetCache[idx];
 
   if (cache && cache.processed) {
-    // Đã xử lý trước đó -> dùng lại đúng 4 góc đã xác định, không auto-detect lại
-    // (giữ nguyên mọi chỉnh sửa tay người dùng đã làm trên phiếu này)
     const result = processSheet(canvas, cache.corners);
-    if (!result.ok) {
-      showManualCornerUI(canvas);
-      return;
-    }
+    if (!result.ok) { showManualCornerUI(canvas); return; }
     hideManualCornerUI();
     state.warpedGrayMat = result.warpedGray;
     state.candidateNo = cache.candidateNo;
@@ -313,10 +316,7 @@ async function loadCurrentSheet() {
   }
 
   const result = processSheet(canvas);
-  if (!result.ok) {
-    showManualCornerUI(canvas);
-    return;
-  }
+  if (!result.ok) { showManualCornerUI(canvas); return; }
   finalizeNewSheetResult(canvas, result);
 }
 
@@ -344,7 +344,6 @@ function finalizeNewSheetResult(rawCanvas, result) {
   renderAnswerGrid();
 }
 
-// Đồng bộ chỉnh sửa tay (click đáp án / candidate) vào cache của trang hiện tại
 function syncCurrentIntoCache() {
   const cache = state.sheetCache[state.currentIndex];
   if (!cache) return;
@@ -572,7 +571,7 @@ function renderCandidateCard() {
   const nameEl = document.getElementById("candidateNoName");
   valueEl.textContent = state.candidateNo !== null ? "Candidate No. " + state.candidateNo : "—";
 
-  const student = state.rosterResults.find(s => s.candidateNo === normalizeCandidateNo(state.candidateNo));
+  const student = matchStudent(state.studentList, state.candidateNo);
   nameEl.textContent = student ? `${student.hoTen} (${student.mssv})` : "Chưa xác định sinh viên";
 }
 
@@ -666,7 +665,8 @@ async function goNextSheet() {
 }
 
 // ============================================================
-// 8. CHẤM ĐIỂM TOÀN BỘ (chỉ chạy khi bấm nút, gộp vào roster bền vững)
+// 8. CHẤM ĐIỂM TOÀN BỘ — không cần danh sách sinh viên,
+//    tự phát hiện trùng Candidate No. và cho chọn Bỏ qua / Ghi đè
 // ============================================================
 
 function showLoading(text) {
@@ -676,20 +676,48 @@ function showLoading(text) {
 function hideLoading() {
   document.getElementById("loadingOverlay").hidden = true;
 }
-// Nhường 1 nhịp cho trình duyệt vẽ overlay loading trước khi chạy vòng lặp nặng (đồng bộ)
 function nextFrame() {
   return new Promise(resolve => setTimeout(resolve, 30));
 }
 
+function buildResultEntry(cache, maDe) {
+  let dung = 0;
+  const cauSai = [];
+  const chiTiet = [];
+  for (let q = 1; q <= SO_CAU; q++) {
+    const dapAnDung = maDe.answers[q];
+    const dapAnSV = cache.currentAnswers[q];
+    const isDung = dapAnSV === dapAnDung;
+    if (isDung) dung++;
+    else if (!dapAnSV) cauSai.push(`${q}(bỏ trống)`);
+    else cauSai.push(String(q));
+    chiTiet.push({ cau: q, dapAnSV: dapAnSV || null, dapAnDung, dung: isDung });
+  }
+  const diem = dung * 5;
+  const dungTong = `${dung}/${SO_CAU}`;
+  const student = matchStudent(state.studentList, cache.candidateNo);
+
+  return {
+    candidateNo: cache.candidateNo || "(không đọc được)",
+    hoTen: student ? student.hoTen : "",
+    mssv: student ? student.mssv : "",
+    matched: !!student,
+    manualOverride: false,
+    de: maDe.name,
+    diem, dungTong, cauSai, chiTiet
+  };
+}
+
+let blankKeyCounter = 0;
+
 async function gradeAllConfirmedSheets() {
   const maDe = getCurrentMaDe();
   if (!maDe) { alert("Chưa chọn mã đề để chấm."); return; }
-  if (state.rosterResults.length === 0) {
-    alert("Chưa tải danh sách sinh viên (bấm \"Tải lên\" ở danh sách sinh viên trước).");
-    return;
-  }
 
-  const toGrade = state.sheetCache.filter(c => c && c.confirmed && !c.graded);
+  const toGrade = [];
+  state.sheetCache.forEach((cache, idx) => {
+    if (cache && cache.confirmed && !cache.graded) toGrade.push({ cache, idx });
+  });
   if (toGrade.length === 0) {
     alert("Không có phiếu nào đã xác nhận để chấm. Hãy \"Xác nhận\" ít nhất 1 phiếu trước.");
     return;
@@ -698,73 +726,110 @@ async function gradeAllConfirmedSheets() {
   showLoading(`Đang chấm điểm ${toGrade.length} phiếu...`);
   await nextFrame();
 
-  let gradedCount = 0;
-  const newlyGraded = []; // để đồng bộ lên Google Sheet, chỉ gồm các dòng vừa chấm trong lượt này
+  const committed = [];
+  const conflicts = [];
 
-  state.sheetCache.forEach(cache => {
-    if (!cache || !cache.confirmed || cache.graded) return;
+  toGrade.forEach(({ cache, idx }) => {
+    const entry = buildResultEntry(cache, maDe);
+    const key = cache.candidateNo ? normalizeCandidateNo(cache.candidateNo) : ("blank_" + (blankKeyCounter++));
 
-    let dung = 0;
-    const cauSai = [];
-    const chiTiet = [];
-    for (let q = 1; q <= SO_CAU; q++) {
-      const dapAnDung = maDe.answers[q];
-      const dapAnSV = cache.currentAnswers[q];
-      const isDung = dapAnSV === dapAnDung;
-      if (isDung) dung++;
-      else if (!dapAnSV) cauSai.push(`${q}(bỏ trống)`);
-      else cauSai.push(String(q));
-      chiTiet.push({ cau: q, dapAnSV: dapAnSV || null, dapAnDung, dung: isDung });
-    }
-    const diem = dung * 5;
-    const dungTong = `${dung}/${SO_CAU}`;
-    const candidateNoNorm = normalizeCandidateNo(cache.candidateNo);
-
-    const rosterRow = state.rosterResults.find(r => r.candidateNo === candidateNoNorm);
-    let resultEntry;
-    if (rosterRow && rosterRow.diem === null) {
-      rosterRow.diem = diem;
-      rosterRow.dungTong = dungTong;
-      rosterRow.cauSai = cauSai;
-      rosterRow.de = maDe.name;
-      resultEntry = rosterRow;
-    } else if (!rosterRow) {
-      resultEntry = {
-        candidateNo: cache.candidateNo || "?",
-        hoTen: "", mssv: "", unmatched: true,
-        de: maDe.name, diem, dungTong, cauSai
-      };
-      state.unmatchedResults.push(resultEntry);
-    }
-    // nếu rosterRow đã có điểm từ trước (chấm đề khác rồi) -> bỏ qua, không ghi đè
-
-    if (resultEntry) {
-      newlyGraded.push({ ...resultEntry, chiTiet });
+    if (key && state.gradedResults[key] !== undefined) {
+      conflicts.push({ key, idx, existing: state.gradedResults[key], incoming: entry });
+    } else {
+      state.gradedResults[key] = entry;
       cache.graded = true;
-      gradedCount++;
+      committed.push(entry);
     }
   });
 
+  hideLoading();
   updatePendingCountLabel();
   renderResultTable();
 
-  let syncMsg = "";
-  if (SheetsSync.isConfigured() && newlyGraded.length > 0) {
-    showLoading(`Đang đồng bộ ${newlyGraded.length} kết quả lên Google Sheet...`);
-    const synced = await SheetsSync.saveResultsBatch(newlyGraded);
-    syncMsg = synced ? "\nĐã đồng bộ lên Google Sheet." : "\nĐồng bộ Google Sheet thất bại (kiểm tra URL/mạng) — kết quả vẫn còn trong app, có thể chấm lại sau.";
-  }
-
-  hideLoading();
-  alert(`Đã chấm ${gradedCount} phiếu theo ${maDe.name}.${syncMsg}`);
-
-  if (gradedCount > 0) {
-    resetSheetPanelForNextExam();
+  if (conflicts.length > 0) {
+    state.pendingConflicts = conflicts;
+    state.pendingFinish = { maDe, committed };
+    showConflictModal();
+  } else {
+    await finishGrading(maDe, committed);
   }
 }
 
-// Dọn khung xem phiếu để sẵn sàng nạp mã đề/lô phiếu tiếp theo.
-// Không đụng tới rosterResults/unmatchedResults (kết quả vẫn giữ nguyên trong tab Kết quả).
+function showConflictModal() {
+  renderConflictList();
+  document.getElementById("conflictModal").hidden = false;
+}
+
+function renderConflictList() {
+  const listEl = document.getElementById("conflictList");
+  listEl.innerHTML = "";
+  state.pendingConflicts.forEach((c, i) => {
+    const item = document.createElement("div");
+    item.className = "conflict-item";
+    item.innerHTML = `
+      <div class="conflict-cand">Candidate No. ${c.existing.candidateNo}</div>
+      <div class="conflict-row">Bài đã có: ${c.existing.de || "?"} — điểm ${c.existing.diem} (${c.existing.dungTong})</div>
+      <div class="conflict-row">Bài mới quét: ${c.incoming.de || "?"} — điểm ${c.incoming.diem} (${c.incoming.dungTong})</div>
+      <div class="conflict-actions">
+        <button class="btn" data-action="skip" data-i="${i}">Bỏ qua (giữ bài cũ)</button>
+        <button class="btn btn-primary" data-action="overwrite" data-i="${i}">Ghi đè (dùng bài mới)</button>
+      </div>
+    `;
+    listEl.appendChild(item);
+  });
+
+  listEl.querySelectorAll("button[data-action]").forEach(btn => {
+    btn.addEventListener("click", () => resolveConflict(parseInt(btn.dataset.i, 10), btn.dataset.action));
+  });
+}
+
+async function resolveConflict(index, action) {
+  const conflict = state.pendingConflicts[index];
+  if (!conflict) return;
+  const cacheEntry = findSheetCacheByIndex(conflict.idx);
+
+  if (action === "overwrite") {
+    state.gradedResults[conflict.key] = conflict.incoming;
+    if (cacheEntry) cacheEntry.graded = true;
+    state.pendingFinish.committed.push(conflict.incoming);
+  } else {
+    // Bỏ qua: giữ bài cũ, đánh dấu phiếu này đã xử lý xong (không chấm lại nữa)
+    if (cacheEntry) cacheEntry.graded = true;
+  }
+
+  state.pendingConflicts.splice(index, 1);
+  renderResultTable();
+  updatePendingCountLabel();
+
+  if (state.pendingConflicts.length === 0) {
+    document.getElementById("conflictModal").hidden = true;
+    const { maDe, committed } = state.pendingFinish;
+    state.pendingFinish = null;
+    await finishGrading(maDe, committed);
+  } else {
+    renderConflictList();
+  }
+}
+
+function findSheetCacheByIndex(idx) {
+  return state.sheetCache[idx];
+}
+
+async function finishGrading(maDe, committed) {
+  let syncMsg = "";
+  if (SheetsSync.isConfigured() && committed.length > 0) {
+    showLoading(`Đang đồng bộ ${committed.length} kết quả lên Google Sheet...`);
+    const synced = await SheetsSync.saveResultsBatch(committed);
+    syncMsg = synced
+      ? "\nĐã đồng bộ lên Google Sheet."
+      : "\nĐồng bộ Google Sheet thất bại (kiểm tra URL/mạng) — kết quả vẫn còn trong app.";
+    hideLoading();
+  }
+
+  alert(`Đã chấm ${committed.length} phiếu theo ${maDe.name}.${syncMsg}`);
+  resetSheetPanelForNextExam();
+}
+
 function resetSheetPanelForNextExam() {
   state.pageCanvases = [];
   state.sheetCache = [];
@@ -791,11 +856,19 @@ function resetSheetPanelForNextExam() {
 }
 
 // ============================================================
-// 9. TAB KẾT QUẢ — gộp roster + unmatched, sắp theo Candidate No.
+// 9. TAB KẾT QUẢ — bảng gộp, sắp theo Candidate No., cho sửa tay tên/MSSV
 // ============================================================
 
 function renderResultTable() {
-  const allRows = [...state.rosterResults, ...state.unmatchedResults];
+  const gradedRows = Object.entries(state.gradedResults).map(([key, entry]) => ({ key, ...entry, isPlaceholder: false }));
+
+  // Hàng chờ: sinh viên có trong danh sách nhưng chưa có bài chấm nào khớp candidateNo
+  const gradedKeys = new Set(Object.keys(state.gradedResults));
+  const placeholderRows = state.studentList
+    .filter(s => !gradedKeys.has(s.candidateNo))
+    .map(s => ({ key: "placeholder_" + s.candidateNo, candidateNo: s.candidateNo, hoTen: s.hoTen, mssv: s.mssv, de: "", diem: null, dungTong: "", cauSai: [], isPlaceholder: true }));
+
+  const allRows = [...gradedRows, ...placeholderRows];
   allRows.sort((a, b) => {
     const na = parseInt(a.candidateNo, 10);
     const nb = parseInt(b.candidateNo, 10);
@@ -809,37 +882,52 @@ function renderResultTable() {
   tbody.innerHTML = "";
   allRows.forEach(r => {
     const tr = document.createElement("tr");
-    if (r.unmatched) tr.classList.add("unmatched");
-    const daChamRoi = r.diem !== null && r.diem !== undefined;
+    if (r.isPlaceholder) tr.classList.add("placeholder-row");
+    else if (!r.matched) tr.classList.add("unmatched");
+
+    const editable = !r.isPlaceholder;
     tr.innerHTML = `
       <td>${r.candidateNo ?? ""}</td>
-      <td>${r.hoTen ?? ""}</td>
-      <td class="mssv-cell">${r.unmatched ? "chưa khớp" : (r.mssv ?? "")}</td>
+      <td class="editable-name" ${editable ? 'contenteditable="true"' : ""} data-key="${r.key}" data-field="hoTen">${r.hoTen ?? ""}</td>
+      <td class="mssv-cell" ${editable ? 'contenteditable="true"' : ""} data-key="${r.key}" data-field="mssv">${r.isPlaceholder ? (r.mssv ?? "") : (r.mssv ?? "")}</td>
       <td>${r.de ?? ""}</td>
-      <td>${daChamRoi ? r.diem : ""}</td>
-      <td>${daChamRoi ? r.dungTong : ""}</td>
-      <td>${daChamRoi ? (r.cauSai || []).join(", ") : ""}</td>
+      <td>${r.diem !== null && r.diem !== undefined ? r.diem : ""}</td>
+      <td>${r.dungTong ?? ""}</td>
+      <td>${(r.cauSai || []).join(", ")}</td>
     `;
     tbody.appendChild(tr);
   });
 
-  const gradedRows = allRows.filter(r => r.diem !== null && r.diem !== undefined);
-  document.getElementById("statTotal").textContent = `${gradedRows.length} / ${state.rosterResults.length}`;
-  const avg = gradedRows.length
-    ? (gradedRows.reduce((s, r) => s + (r.diem || 0), 0) / gradedRows.length).toFixed(1)
+  tbody.querySelectorAll("td[contenteditable='true']").forEach(td => {
+    td.addEventListener("blur", onEditableCellBlur);
+  });
+
+  const gradedCount = gradedRows.filter(r => r.diem !== null).length;
+  document.getElementById("statTotal").textContent = `${gradedCount} / ${allRows.length}`;
+  const avg = gradedCount
+    ? (gradedRows.reduce((s, r) => s + (r.diem || 0), 0) / gradedCount).toFixed(1)
     : "—";
   document.getElementById("statAvg").textContent = avg;
-  document.getElementById("statUnmatched").textContent = state.unmatchedResults.length;
+  document.getElementById("statUnmatched").textContent = gradedRows.filter(r => !r.matched).length;
   const maDe = getCurrentMaDe();
   document.getElementById("statMaDe").textContent = maDe ? maDe.name : "—";
 }
 
+function onEditableCellBlur(e) {
+  const td = e.target;
+  const key = td.dataset.key;
+  const field = td.dataset.field;
+  const entry = state.gradedResults[key];
+  if (!entry) return;
+  entry[field] = td.textContent.trim();
+  entry.manualOverride = true;
+}
+
 async function exportExcel() {
-  const allRows = [...state.rosterResults, ...state.unmatchedResults]
-    .filter(r => r.diem !== null && r.diem !== undefined);
-  if (allRows.length === 0) { alert("Chưa có kết quả để xuất."); return; }
-  allRows.sort((a, b) => (parseInt(a.candidateNo, 10) || 0) - (parseInt(b.candidateNo, 10) || 0));
-  await exportResultsToExcel(allRows, "ket_qua_cham_thi.xlsx");
+  const rows = Object.values(state.gradedResults).filter(r => r.diem !== null && r.diem !== undefined);
+  if (rows.length === 0) { alert("Chưa có kết quả để xuất."); return; }
+  rows.sort((a, b) => (parseInt(a.candidateNo, 10) || 0) - (parseInt(b.candidateNo, 10) || 0));
+  await exportResultsToExcel(rows, "ket_qua_cham_thi.xlsx");
 }
 
 // ============================================================

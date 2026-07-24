@@ -433,3 +433,41 @@ textarea{ width:100%; resize:vertical; font-family:monospace; }
 }
 @keyframes omr-spin{ to{ transform:rotate(360deg); } }
 #loadingText{ font-size:14px; color:var(--text-primary); margin:0; }
+
+/* ===== Modal xử lý trùng Candidate No. ===== */
+.conflict-box{
+  max-width:600px;
+  width:90%;
+  max-height:80vh;
+  align-items:stretch;
+  overflow:hidden;
+}
+.conflict-title{ font-size:15px; font-weight:600; margin:0 0 4px; }
+.conflict-list{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  max-height:55vh;
+  overflow-y:auto;
+}
+.conflict-item{
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:10px 12px;
+  font-size:13px;
+  text-align:left;
+}
+.conflict-item .conflict-cand{ font-weight:600; margin-bottom:4px; }
+.conflict-item .conflict-row{ color:var(--text-secondary); margin-bottom:2px; }
+.conflict-item .conflict-actions{ display:flex; gap:8px; margin-top:8px; }
+
+/* ===== Ô có thể sửa tay trong bảng kết quả ===== */
+td[contenteditable="true"]{
+  cursor:text;
+  background: #FFFDE7;
+}
+td[contenteditable="true"]:focus{
+  outline:2px solid var(--brand-accent);
+  outline-offset:-2px;
+}
+tr.placeholder-row{ color: var(--text-muted); font-style:italic; }
