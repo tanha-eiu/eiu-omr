@@ -54,6 +54,7 @@
       <input type="file" id="inputPdf" accept="application/pdf" hidden>
 
       <span id="progressLabel" class="toolbar-status">Chưa có phiếu nào</span>
+      <span id="debugThresholdLabel" class="toolbar-status-inline"></span>
     </div>
 
     <div class="toolbar toolbar-secondary">
@@ -70,7 +71,7 @@
         </div>
         <div id="manualCornerBanner" class="warning-banner" hidden>
           <span class="icon-alert"></span>
-          <span>Không tự dò được 4 marker góc — kéo 4 chấm vào đúng vị trí marker rồi bấm "Căn chỉnh"</span>
+          <span>Kéo 4 chấm đỏ vào đúng vị trí 4 marker góc trên phiếu, rồi bấm "Căn chỉnh"</span>
         </div>
         <div id="sheetCanvasWrap" class="sheet-canvas-wrap">
           <canvas id="sheetCanvas"></canvas>
@@ -87,6 +88,7 @@
           <button id="btnAlignManual" class="btn" hidden>Căn chỉnh</button>
           <button id="btnZoomIn" class="btn">Phóng to</button>
           <button id="btnZoomOut" class="btn">Thu nhỏ</button>
+          <button id="btnDebugMarkers" class="btn">Chỉnh tay marker</button>
         </div>
       </div>
 
@@ -196,13 +198,13 @@
 
 </main>
 
-<script src="js/config.js"></script>
-<script src="js/lib-loader.js"></script>
-<script src="js/template-config.js"></script>
-<script src="js/pdf-loader.js"></script>
-<script src="js/omr-engine.js"></script>
-<script src="js/excel-io.js?v=3"></script>
-<script src="js/sheets-sync.js"></script>
-<script src="js/app.js?v=3"></script>
+<script src="js/config.js?v=8"></script>
+<script src="js/lib-loader.js?v=8"></script>
+<script src="js/template-config.js?v=8"></script>
+<script src="js/pdf-loader.js?v=8"></script>
+<script src="js/omr-engine.js?v=8"></script>
+<script src="js/excel-io.js?v=8"></script>
+<script src="js/sheets-sync.js?v=8"></script>
+<script src="js/app.js?v=8"></script>
 </body>
 </html>

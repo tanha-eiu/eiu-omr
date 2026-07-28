@@ -309,6 +309,7 @@ async function loadCurrentSheet() {
     state.candidateColumns = cache.candidateColumns;
     state.currentAnswers = { ...cache.currentAnswers };
     state.reviewFlags = { ...cache.reviewFlags };
+    applyOmrDebugLabel(result.fillThreshold);
     drawSheetCanvas();
     renderCandidateCard();
     renderAnswerGrid();
@@ -320,6 +321,11 @@ async function loadCurrentSheet() {
   finalizeNewSheetResult(canvas, result);
 }
 
+function applyOmrDebugLabel(fillThreshold) {
+  const el = document.getElementById("debugThresholdLabel");
+  if (el) el.textContent = fillThreshold !== undefined ? `(ngưỡng tô: ${Math.round(fillThreshold)})` : "";
+}
+
 function finalizeNewSheetResult(rawCanvas, result) {
   hideManualCornerUI();
   state.warpedGrayMat = result.warpedGray;
@@ -327,6 +333,7 @@ function finalizeNewSheetResult(rawCanvas, result) {
   state.candidateColumns = result.candidateResult.columns;
   state.currentAnswers = { ...result.answerResult.answers };
   state.reviewFlags = { ...result.answerResult.reviewFlags };
+  applyOmrDebugLabel(result.fillThreshold);
 
   state.sheetCache[state.currentIndex] = {
     processed: true,
@@ -355,7 +362,7 @@ function syncCurrentIntoCache() {
 
 // ---- Chỉnh góc thủ công (chỉ hiện khi auto-detect marker thất bại thật sự) ----
 
-function showManualCornerUI(rawCanvas) {
+function showManualCornerUI(rawCanvas, startingCorners) {
   document.getElementById("manualCornerBanner").hidden = false;
   document.getElementById("btnAlignManual").hidden = false;
   document.getElementById("cornerHandles").hidden = false;
@@ -364,16 +371,34 @@ function showManualCornerUI(rawCanvas) {
   canvasEl.width = rawCanvas.width;
   canvasEl.height = rawCanvas.height;
   canvasEl.getContext("2d").drawImage(rawCanvas, 0, 0);
+  canvasEl.style.transform = "";
 
-  const w = rawCanvas.width, h = rawCanvas.height;
-  state.manualCorners = {
-    tl: { x: 0.06 * w, y: 0.05 * h },
-    tr: { x: 0.94 * w, y: 0.05 * h },
-    br: { x: 0.94 * w, y: 0.95 * h },
-    bl: { x: 0.06 * w, y: 0.95 * h }
-  };
+  if (startingCorners) {
+    state.manualCorners = {
+      tl: { ...startingCorners.tl }, tr: { ...startingCorners.tr },
+      br: { ...startingCorners.br }, bl: { ...startingCorners.bl }
+    };
+  } else {
+    const w = rawCanvas.width, h = rawCanvas.height;
+    state.manualCorners = {
+      tl: { x: 0.06 * w, y: 0.05 * h },
+      tr: { x: 0.94 * w, y: 0.05 * h },
+      br: { x: 0.94 * w, y: 0.95 * h },
+      bl: { x: 0.06 * w, y: 0.95 * h }
+    };
+  }
   positionCornerHandles();
   initCornerHandleDrag();
+}
+
+// Vào chế độ chỉnh tay marker NGAY CẢ KHI auto-detect "thành công" nhưng bị lệch —
+// dùng chính tọa độ auto-detect làm điểm khởi đầu, chỉ cần kéo sửa điểm sai.
+function enterManualCorrectionMode() {
+  const idx = state.currentIndex;
+  const rawCanvas = state.pageCanvases[idx];
+  const cache = state.sheetCache[idx];
+  if (!rawCanvas) { alert("Chưa có phiếu để chỉnh."); return; }
+  showManualCornerUI(rawCanvas, cache ? cache.corners : null);
 }
 
 function hideManualCornerUI() {
@@ -842,6 +867,7 @@ function resetSheetPanelForNextExam() {
   canvasEl.onclick = null;
 
   document.getElementById("progressLabel").textContent = "Chưa có phiếu nào";
+  document.getElementById("debugThresholdLabel").textContent = "";
   document.getElementById("warningBanner").hidden = true;
   document.getElementById("manualCornerBanner").hidden = true;
   document.getElementById("cornerHandles").hidden = true;
@@ -957,6 +983,7 @@ function initEvents() {
   document.getElementById("btnNextSheet").addEventListener("click", goNextSheet);
   document.getElementById("btnZoomIn").addEventListener("click", () => { state.zoom = Math.min(2, state.zoom + 0.2); applyZoom(); });
   document.getElementById("btnZoomOut").addEventListener("click", () => { state.zoom = Math.max(0.4, state.zoom - 0.2); applyZoom(); });
+  document.getElementById("btnDebugMarkers").addEventListener("click", enterManualCorrectionMode);
 }
 
 function applyZoom() {

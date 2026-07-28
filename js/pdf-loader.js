@@ -5,7 +5,7 @@
 // Render tất cả các trang của file PDF thành mảng canvas.
 // scale=2 tương đương ~144-200dpi tùy kích thước trang gốc,
 // đủ chi tiết để đọc bubble mà không quá nặng.
-async function renderPdfToCanvases(file, scale = 2.2) {
+async function renderPdfToCanvases(file, scale = 3.0) {
   await PdfLib.load();
 
   const arrayBuffer = await file.arrayBuffer();
