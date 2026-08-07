@@ -29,11 +29,13 @@ function detectMarkers(cvSrc) {
   const bin = new cv.Mat();
   cv.threshold(gray, bin, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
 
+  // Vùng tìm kiếm marker: marker thật chỉ cách mép trang ~6%. Thu hẹp còn 9%
+  // để đủ dư cho marker thật nhưng không chạm vào nội dung bảng câu hỏi.
   const windows = {
-    tl: { x0: 0,        y0: 0,        x1: 0.15 * w, y1: 0.12 * h, corner: { x: 0, y: 0 } },
-    tr: { x0: 0.85 * w, y0: 0,        x1: w,        y1: 0.12 * h, corner: { x: w, y: 0 } },
-    bl: { x0: 0,        y0: 0.88 * h, x1: 0.15 * w, y1: h,        corner: { x: 0, y: h } },
-    br: { x0: 0.85 * w, y0: 0.88 * h, x1: w,        y1: h,        corner: { x: w, y: h } }
+    tl: { x0: 0,        y0: 0,        x1: 0.09 * w, y1: 0.09 * h, corner: { x: 0, y: 0 } },
+    tr: { x0: 0.91 * w, y0: 0,        x1: w,        y1: 0.09 * h, corner: { x: w, y: 0 } },
+    bl: { x0: 0,        y0: 0.91 * h, x1: 0.09 * w, y1: h,        corner: { x: 0, y: h } },
+    br: { x0: 0.91 * w, y0: 0.91 * h, x1: w,        y1: h,        corner: { x: w, y: h } }
   };
 
   const result = {};
@@ -47,16 +49,14 @@ function detectMarkers(cvSrc) {
     const hierarchy = new cv.Mat();
     cv.findContours(roi, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-    // Marker thật rất nhỏ (~0.01% diện tích trang) và luôn nằm sát góc trang nhất.
-    // Không chọn contour lớn nhất (dễ bắt nhầm logo/chữ), mà chọn contour GẦN GÓC TRANG NHẤT
-    // trong số các contour có hình dạng và kích thước hợp lý.
     let best = null;
     for (let i = 0; i < contours.size(); i++) {
       const c = contours.get(i);
       const rect = cv.boundingRect(c);
-      const area = rect.width * rect.height;
+      const bboxArea = rect.width * rect.height;
       const aspect = rect.width / Math.max(rect.height, 1);
-      if (aspect > 1.6 && aspect < 8 && area > 40 && area < pageArea * 0.0006) {
+
+      if (aspect > 1.6 && aspect < 8 && bboxArea > 40 && bboxArea < pageArea * 0.0006) {
         const cx = x0 + rect.x + rect.width / 2;
         const cy = y0 + rect.y + rect.height / 2;
         const dist = Math.hypot(cx - win.corner.x, cy - win.corner.y);

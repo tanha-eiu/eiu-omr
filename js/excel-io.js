@@ -27,41 +27,73 @@ function normalizeHeader(h) {
   return String(h).trim().toLowerCase().replace(/[.\s]+/g, "");
 }
 
-// Tìm giá trị cột trong 1 dòng dữ liệu, dựa trên danh sách các tên cột chấp nhận được
-function findColumnValue(row, acceptedNames) {
-  const accepted = acceptedNames.map(normalizeHeader);
-  for (const key of Object.keys(row)) {
-    if (accepted.includes(normalizeHeader(key))) return row[key];
-  }
-  return undefined;
-}
-
-// Đọc file danh sách sinh viên: cần các cột STT, Họ và tên, MSSV, Candidate No.
-// Trả về mảng [{stt, hoTen, mssv, candidateNo}], candidateNo được chuẩn hóa về dạng chuỗi số
-// (bỏ số 0 ở đầu để so khớp với kết quả đọc từ phiếu, vì phiếu bỏ cột trống)
+// Đọc file danh sách sinh viên. Hỗ trợ 2 kiểu file:
+//  1) File đơn giản: có sẵn cột "Candidate No.", "Họ và tên", "MSSV" ngay dòng đầu.
+//  2) File phòng đào tạo cấp: có vài dòng tiêu đề trường/môn học phía trên trước khi
+//     tới dòng tiêu đề bảng thật (Stt, Mã SV, Họ lót, Tên, ...) — khi đó dùng cột
+//     "Stt" làm Candidate No., và ghép "Họ lót" + " " + "Tên" thành Họ và tên.
+// Trả về mảng [{stt, hoTen, mssv, candidateNo}].
 async function readStudentList(file) {
   await XlsxLib.load();
   const buf = await file.arrayBuffer();
   const wb = window["XLSX"].read(buf, { type: "array" });
   const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows = window["XLSX"].utils.sheet_to_json(sheet, { defval: "" });
+  // Đọc dạng mảng-các-mảng (không giả định dòng 1 là tiêu đề) để tự dò đúng
+  // dòng tiêu đề bảng, vì file phòng đào tạo có vài dòng thông tin trường/môn ở trên.
+  const rows = window["XLSX"].utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
-  if (rows.length > 0) {
-    const headers = Object.keys(rows[0]);
-    const candidateVal = findColumnValue(rows[0], ["Candidate No.", "Candidate No", "candidateNo", "SBD", "Số báo danh"]);
-    if (candidateVal === undefined) {
-      console.warn("Không tìm thấy cột Candidate No. trong file Excel. Các cột hiện có:", headers);
+  const HEADER_MARKERS = ["stt", "candidateno", "sbd", "sobaodanh"];
+  let headerRowIdx = -1;
+  let headerMap = {}; // tên cột đã chuẩn hóa -> chỉ số cột
+
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
+    const map = {};
+    row.forEach((cell, c) => { if (cell !== "" && cell !== undefined) map[normalizeHeader(cell)] = c; });
+    if (HEADER_MARKERS.some(m => map[m] !== undefined)) {
+      headerRowIdx = r;
+      headerMap = map;
+      break;
     }
   }
 
-  return rows.map(r => {
-    const stt = findColumnValue(r, ["STT"]) ?? "";
-    const hoTen = findColumnValue(r, ["Họ và tên", "Họ tên", "hoTen"]) ?? "";
-    const mssv = String(findColumnValue(r, ["MSSV"]) ?? "").trim();
-    const rawCandidate = String(findColumnValue(r, ["Candidate No.", "Candidate No", "candidateNo", "SBD", "Số báo danh"]) ?? "").trim();
-    const candidateNo = normalizeCandidateNo(rawCandidate);
-    return { stt, hoTen, mssv, candidateNo };
-  });
+  if (headerRowIdx === -1) return []; // không tìm thấy dòng tiêu đề hợp lệ nào
+
+  const getCell = (row, ...names) => {
+    for (const n of names) {
+      const idx = headerMap[normalizeHeader(n)];
+      if (idx !== undefined && row[idx] !== undefined && row[idx] !== "") return row[idx];
+    }
+    return undefined;
+  };
+
+  const list = [];
+  for (let r = headerRowIdx + 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || row.every(c => c === "" || c === undefined)) continue;
+
+    const explicitCandidate = getCell(row, "Candidate No.", "Candidate No", "SBD", "Số báo danh");
+    const stt = getCell(row, "STT", "Stt");
+    const candidateSource = explicitCandidate !== undefined ? explicitCandidate : stt;
+    if (candidateSource === undefined) continue; // dòng không có Stt/Candidate No. -> bỏ qua (hết bảng)
+
+    const explicitHoTen = getCell(row, "Họ và tên", "Họ tên");
+    const hoLot = getCell(row, "Họ lót");
+    const ten = getCell(row, "Tên");
+    const hoTen = explicitHoTen !== undefined
+      ? String(explicitHoTen).trim()
+      : [hoLot, ten].filter(v => v !== undefined).map(v => String(v).trim()).join(" ");
+
+    const mssv = String(getCell(row, "MSSV", "Mã SV") ?? "").trim();
+
+    list.push({
+      stt: String(stt !== undefined ? stt : candidateSource).trim(),
+      hoTen,
+      mssv,
+      candidateNo: normalizeCandidateNo(candidateSource)
+    });
+  }
+  return list;
 }
 
 // Tìm sinh viên theo candidateNo đọc được từ phiếu (cả 2 phía đã được chuẩn hóa).
